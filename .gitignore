@@ -1,0 +1,7 @@
+# Generated tape audio (regenerate with `python loader.py`)
+audio.wav
+tape.wav
+
+# Build output (regenerate with the "make (sjasmplus)" task)
+output/
+.tmp/
