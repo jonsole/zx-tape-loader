@@ -28,7 +28,7 @@ Assembling `loader.s` produces `loader.tap` (the BASIC-header tape image) plus `
 
 `lunarjetman.s` is a separate assembly unit (own `DEVICE`/`ORG`) that is not included by
 `loader.s`; it's assembled independently and produces `jetman.bin` via `SAVEBIN`, which is then
-consumed by `loader.py`.
+consumed by `build_lunarjetman_tape.py`.
 
 ## Debug / run
 
@@ -42,13 +42,17 @@ the loader's memory layout changes.
 
 ## Generating the tape audio
 
-`loader.py` (requires `numpy`, `scipy`) reads `loader.tap`, `lunarjetman.scr`, and `jetman.bin` from
-the working directory and synthesizes `audio.wav`, then applies wow/flutter modulation to produce
-`tape.wav`. Run it after rebuilding `loader.tap`/`jetman.bin` so the audio reflects the latest
-build:
+`loader.py` (requires `numpy`, `scipy`) is a reusable module for tape/WAV synthesis (`TapeGenerator`,
+generic `.tap`/screen-block encoding, wow/flutter). It has no side effects on import — all the
+actual tape-building happens in payload-specific scripts.
+
+`build_lunarjetman_tape.py` is that script for this project's payload: it reads `loader.tap`,
+`lunarjetman.scr`, and `jetman.bin` from the working directory and synthesizes `audio.wav`, then
+applies wow/flutter modulation to produce `tape.wav`. Run it after rebuilding `loader.tap`/
+`jetman.bin` so the audio reflects the latest build:
 
 ```
-python loader.py
+python build_lunarjetman_tape.py
 ```
 
 There's no dependency manifest — install `numpy`/`scipy` manually if missing.
@@ -121,13 +125,14 @@ the current 4-digit countdown value, decremented digit-by-digit as loading progr
 Assembled independently at `$7000`. Copies the embedded `lunarjetman.bin` (`INCBIN`) up to `$8000`,
 patches two bytes in the target game image (skips a frame-count check, installs a `JP (HL)` at a
 fixed ROM/system variable address) as an in-place binary patch, then jumps into it. `SAVEBIN`
-extracts the relocator+payload as `jetman.bin`, which `loader.py` embeds as a plain memory block in
-the generated tape/audio.
+extracts the relocator+payload as `jetman.bin`, which `build_lunarjetman_tape.py` embeds as a plain
+memory block in the generated tape/audio.
 
 ## Working assets
 
 - `*.scr` — ZX Spectrum screen dumps used as tape payloads (e.g. `LunarJetman.scr`, consumed by
-  `loader.py`'s `gen_block` calls, whose x/y/w/h regions describe the screen layout to send).
+  `build_lunarjetman_tape.py`'s `gen_block` calls, whose x/y/w/h regions describe the screen layout
+  to send).
 - `*.tap`/`*.tzx` — reference/sample tape images (`JETMAN.TAP`, `Exolon.tzx`) and generated output
   (`loader.tap`, `test.tap`, `output.tap`).
 - `jetman_bad`/`jetman_good`/`jetman_loaded.z80` — reference snapshots/binaries used while

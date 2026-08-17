@@ -24,9 +24,11 @@ with simulated wow and flutter.
   work is budgeted to a fixed, commented T-state count so it doesn't perturb the loader's timing.
 - **`lunarjetman.s`** — A small relocator/patcher for the Lunar Jetman payload: copies it into
   place, patches out a frame-count check, and jumps in.
-- **`loader.py`** — Reads the assembled `.tap`/`.scr`/`.bin` files and synthesizes `audio.wav`
-  (then `tape.wav`, with wow/flutter applied) so the loader can be played back like a real
-  cassette.
+- **`loader.py`** — Reusable module for tape-audio synthesis: pulse/bit encoding
+  (`TapeGenerator`), generic `.tap`-file and screen-block encoding, WAV writing, and wow/flutter.
+- **`build_lunarjetman_tape.py`** — Uses `loader.py` to assemble this project's specific payload
+  (`loader.tap` + `lunarjetman.scr` + `jetman.bin`) into `audio.wav`/`tape.wav`, so the loader can
+  be played back like a real cassette.
 
 See [CLAUDE.md](CLAUDE.md) for a deeper architectural writeup.
 
@@ -60,7 +62,7 @@ Both load `output/loader.sna` and `output/loader.sld`, so build first.
 ## Generating the tape audio
 
 ```sh
-python loader.py
+python build_lunarjetman_tape.py
 ```
 
 Reads `loader.tap`, `lunarjetman.scr`, and `jetman.bin` and writes `tape.wav`, ready to play into a

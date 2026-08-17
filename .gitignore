@@ -1,7 +1,9 @@
-# Generated tape audio (regenerate with `python loader.py`)
+# Generated tape audio (regenerate with `python build_lunarjetman_tape.py`)
 audio.wav
 tape.wav
 
 # Build output (regenerate with the "make (sjasmplus)" task)
 output/
 .tmp/
+
+__pycache__/
