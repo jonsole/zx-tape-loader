@@ -22,14 +22,20 @@ COUNTER_DRAW:
 .DELAY_DONE LD C,0                  ; 7
             DELAY_EXIT              ; Total = 38
 
-            ; Calculate screen address and counter value address 
-            ; BC = counter index (0,1,2,3)
-.DIG_NEXT:  DEC HL                  ; 6     Waste 6
-            LD HL,20732             ; 10        HL = base screen address
-            ADD HL,BC               ; 11        HL = digit screen address
+            ; Calculate screen address and counter value address
+            ; BC = counter index (0,1,2,3), B always 0
+            ; NOTE: LOW(20732)=252, and C is at most 3, so 252+C never carries into H - safe
+            ; to add C with an 8-bit ADD instead of ADD HL,BC. Don't reuse this trick for the
+            ; second ADD HL,BC below: HL there is COUNTER_VAL, a relocatable address whose low
+            ; byte isn't guaranteed clear of the carry boundary, so it needs the real 16-bit add.
+            ; Closest achievable to the 38 target without touching the caller - see note below.
+.DIG_NEXT:  LD H,HIGH 20732         ; 7         HL = base screen address
+            LD A,LOW 20732          ; 7
+            ADD A,C                 ; 4         A = digit screen address low byte
+            LD L,A                  ; 4         HL = digit screen address
             EX HL,DE                ; 4         DE = digit screen address, HL = counter value table
             ADD HL,BC               ; 11        HL = counter value address
-            DELAY_EXIT              ; Total = 32
+            DELAY_EXIT              ; Total = 37 (target 38, closest achievable - see note above)
 
             ; Calculate digit gfx address
             LD A,(HL)               ; 7         A = counter value
@@ -60,13 +66,18 @@ COUNTER_DRAW:
             DELAY_EXIT              ; Total = 38
 
             ; Decrement counter value
+            ; NOTE: both paths below total 37, 1 t-state short of the 38 target. This is
+            ; already the closest achievable value: the smallest available filler is 4
+            ; t-states, so padding either path would overshoot to 41 (3 over) - worse than
+            ; leaving it 1 short. Don't "fix" this without restructuring the calling
+            ; fragments too - see .DIG_NEXT above for the same constraint.
 .CNT_DEC    DEC HL                  ; 6         Decrement counter address
             DEC (HL)                ; 11        Decrement counter value
             JP M,.CNT_WRAP          ; 10 (27)   Jump if counter has wrapped
             INC IY                  ; 10    Waste 10
-            DELAY_CONT .CNT_NEXT    ; Total = 37
+            DELAY_CONT .CNT_NEXT    ; Total = 37 (target 38, closest achievable - see note above)
 .CNT_WRAP   LD (HL),79              ; 10        Reset counter
-            DELAY_EXIT              ; Total = 37
+            DELAY_EXIT              ; Total = 37 (target 38, closest achievable - see note above)
             
             ; Check if preceeding counter needs to be decremented, loop back if it does
 .CNT_NEXT   LD A,(HL)               ; 7         Get counter value again
