@@ -57,6 +57,11 @@ python build_lunarjetman_tape.py
 
 There's no dependency manifest — install `numpy`/`scipy` manually if missing.
 
+`convert_tape.py <source.tap|.tzx> <output.wav>` is a generic alternative to
+`build_lunarjetman_tape.py`, for re-encoding a *standard-speed* `.tap`/`.tzx` dump of any game
+through this project's fast loader, rather than this project's own bespoke payload. See
+"Generic tape conversion" below for how it works and its limits.
+
 ## Architecture
 
 ### Tape-embedded BASIC bootstrap (`loader.s`, `basic.s`)
@@ -127,6 +132,33 @@ patches two bytes in the target game image (skips a frame-count check, installs 
 fixed ROM/system variable address) as an in-place binary patch, then jumps into it. `SAVEBIN`
 extracts the relocator+payload as `jetman.bin`, which `build_lunarjetman_tape.py` embeds as a plain
 memory block in the generated tape/audio.
+
+### Generic tape conversion (`convert_tape.py`, `loader.py`'s `build_fast_tape`)
+
+`build_fast_tape` parses an arbitrary source `.tap` (natively) or `.tzx` (standard-speed blocks,
+TZX ID `0x10`, only — anything else raises, since a source tape with its own custom/turbo loader
+can't be generically decoded) into header+data `TapeFile` pairs via `parse_source_files`, then
+re-encodes it through this project's fast protocol:
+
+1. `loader_tap` (this project's own BASIC bootstrap) at standard ROM speed, unchanged.
+2. If a CODE file is exactly Screen$-sized (address 16384, length 6912), its pixel data is loaded
+   first via `gen_block`, in an order from `analyse_screen_regions`: top-to-bottom, skipping
+   character rows with no set pixel and tightly bounding each run of non-blank rows to its actual
+   left/right content. This is a content-aware default, not a re-creation of hand-curated,
+   layered reveals like `build_lunarjetman_tape.py`'s explicit region list (which deliberately
+   loads a narrow title box before a wider bordering pass over the same rows — a per-row bounding
+   box can't reproduce that).
+3. Remaining CODE files as plain memory blocks (`mem_header` + `dme_byte`), at their original
+   addresses.
+4. The terminal "jump" sentinel (`mem_header($0000-256, entry_address)`, matching the `H=0`-signals-
+   done convention `tape.s`'s `.CTRL_LOOP` expects).
+
+The entry address defaults to auto-detection via `find_usr_address`, which scans a Program file's
+tokenized BASIC for a `USR` token followed by ZX BASIC's numeric-literal encoding (ASCII digits,
+then a `0x0E` marker, then a 5-byte value: exponent/sign/lo/hi/unused — `USR` arguments are always
+the "small integer" form, exponent `0`). Verified against `loader.tap`'s own `RANDOMIZE USR` line,
+which correctly resolves to `CODE_START` ($5CD0). Pass `entry_address` explicitly (`--entry` on the
+CLI) when a source tape doesn't follow this convention.
 
 ## Working assets
 

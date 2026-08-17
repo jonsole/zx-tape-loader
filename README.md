@@ -25,10 +25,13 @@ with simulated wow and flutter.
 - **`lunarjetman.s`** — A small relocator/patcher for the Lunar Jetman payload: copies it into
   place, patches out a frame-count check, and jumps in.
 - **`loader.py`** — Reusable module for tape-audio synthesis: pulse/bit encoding
-  (`TapeGenerator`), generic `.tap`-file and screen-block encoding, WAV writing, and wow/flutter.
+  (`TapeGenerator`), generic `.tap`/`.tzx` parsing, screen-block encoding, WAV writing, and
+  wow/flutter, plus `build_fast_tape` to re-encode a whole source tape through the fast loader.
 - **`build_lunarjetman_tape.py`** — Uses `loader.py` to assemble this project's specific payload
   (`loader.tap` + `lunarjetman.scr` + `jetman.bin`) into `audio.wav`/`tape.wav`, so the loader can
   be played back like a real cassette.
+- **`convert_tape.py`** — Generic CLI: re-encodes any standard-speed `.tap`/`.tzx` dump through the
+  fast loader, auto-detecting the entry address and picking a screen-loading order.
 
 See [CLAUDE.md](CLAUDE.md) for a deeper architectural writeup.
 
@@ -67,3 +70,19 @@ python build_lunarjetman_tape.py
 
 Reads `loader.tap`, `lunarjetman.scr`, and `jetman.bin` and writes `tape.wav`, ready to play into a
 real Spectrum's tape input (or a cassette deck to make an actual tape).
+
+### Converting another tape
+
+`convert_tape.py` re-encodes any standard-speed `.tap`/`.tzx` file through this project's fast
+loader — useful for anything that isn't Lunar Jetman's bespoke pipeline above:
+
+```sh
+python convert_tape.py source.tap output.wav
+```
+
+It auto-detects the entry point from the source's own `RANDOMIZE USR n` BASIC line, and if a CODE
+block is exactly Screen$-sized (address 16384, length 6912) it's loaded first, in an order picked
+by `analyse_screen_regions` (top-to-bottom, skipping blank character rows). This only works for
+tapes that already use standard ROM-speed blocks — a tape with its own custom/turbo loader (as
+most original commercial cassettes shipped with) can't be generically parsed, since its bit
+encoding isn't known ahead of time.
