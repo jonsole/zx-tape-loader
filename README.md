@@ -24,14 +24,16 @@ with simulated wow and flutter.
   work is budgeted to a fixed, commented T-state count so it doesn't perturb the loader's timing.
 - **`lunarjetman.s`** — A small relocator/patcher for the Lunar Jetman payload: copies it into
   place, patches out a frame-count check, and jumps in.
-- **`loader.py`** — Reusable module for tape-audio synthesis: pulse/bit encoding
-  (`TapeGenerator`), generic `.tap`/`.tzx` parsing, screen-block encoding, WAV writing, and
-  wow/flutter, plus `build_fast_tape` to re-encode a whole source tape through the fast loader.
+- **`loader.py`** — Reusable module for tape synthesis: pulse/bit encoding (`TapeGenerator`),
+  generic `.tap`/`.tzx` parsing, screen-block encoding, writing the result as a `.tzx` (the fast
+  part as a generalized data block, `write_tzx`), a `.wav` or a `.csw`, and wow/flutter, plus
+  `build_fast_tape` to re-encode a whole source tape through the fast loader.
 - **`build_lunarjetman_tape.py`** — Uses `loader.py` to assemble this project's specific payload
   (`loader.tap` + `lunarjetman.scr` + `jetman.bin`) into `audio.wav`/`tape.wav`, so the loader can
   be played back like a real cassette.
 - **`convert_tape.py`** — Generic CLI: re-encodes any standard-speed `.tap`/`.tzx` dump through the
-  fast loader, auto-detecting the entry address and picking a screen-loading order.
+  fast loader, auto-detecting the entry address and picking a screen-loading order, or taking a
+  designed one with `--pattern`.
 
 See [CLAUDE.md](CLAUDE.md) for a deeper architectural writeup.
 
@@ -39,7 +41,7 @@ See [CLAUDE.md](CLAUDE.md) for a deeper architectural writeup.
 
 - [sjasmplus](https://github.com/z00m128/sjasmplus) to assemble
 - [DeZog](https://marketplace.visualstudio.com/items?itemName=maziac.dezog) (VS Code extension) to debug, either against its built-in `zsim` simulator or [CSpect](https://dailly.blogspot.com/)
-- Python 3 with `numpy` and `scipy` to generate the tape audio
+- Python 3 with `numpy` to generate the tape audio
 
 ## Building
 
@@ -86,3 +88,12 @@ by `analyse_screen_regions` (top-to-bottom, skipping blank character rows). This
 tapes that already use standard ROM-speed blocks — a tape with its own custom/turbo loader (as
 most original commercial cassettes shipped with) can't be generically parsed, since its bit
 encoding isn't known ahead of time.
+
+### Designing a tape
+
+To choose the screen's order yourself -- and the blocks, the entry address and where the loader
+runs -- design the tape in the ZX Spectrum emulator's VS Code extension: right-click a picture or
+a tape, **Design Tape...**, and it writes a `game.tape.json` and a `game.screen.json` and builds
+them with its own `scripts/build_tape.py`, which calls `build_designed_tape` here. The designer
+shows the reveal at tape speed and what everything costs, and checks the design the way
+`check_design` will. `convert_tape.py --pattern game.screen.json` takes just a screen's order.

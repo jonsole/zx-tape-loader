@@ -3,7 +3,7 @@ from loader import (
     encode_tap_file,
     gen_block,
     write_wav,
-    apply_wow_flutter_to_wav,
+    wow_flutter_samples,
 )
 
 
@@ -15,13 +15,7 @@ def build():
     with open('lunarjetman.scr', 'rb') as file:
         data = file.read()
 
-        # short leader
-        for i in range(0, 512):
-            gen.pulse(2168)
-
-        # sync
-        gen.pulse(600)
-        gen.pulse(600)
+        gen.fast_leader()
 
         # generate screen blocks
         gen_block(gen, data, 11, 0, 10, 2)
@@ -34,20 +28,19 @@ def build():
         gen_block(gen, data, 0, 8, 32, 8)
         gen_block(gen, data, 0, 16, 14, 6)
 
-        # signal end of screen blocks
-        gen.dme_byte(0, 5)
+        gen.end_screen()
 
     with open('jetman.bin', 'rb') as file:
         data = file.read()
         gen.mem_header(0x7000, len(data))
         for d in data:
             gen.dme_byte(d)
-        gen.mem_header(0x0000 - 256, 0x7000)
+        gen.end_blocks(0x7000)
 
         gen.pulse(1000000)
 
     write_wav(gen.samples, "audio.wav")
-    apply_wow_flutter_to_wav("audio.wav", "tape.wav")
+    write_wav(wow_flutter_samples(gen), "tape.wav")
 
     print("WAV file 'tape.wav' created successfully!")
 

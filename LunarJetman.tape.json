@@ -1,0 +1,8 @@
+{
+  "meta": {"version":1},
+  "scheme": "zx-tape-loader",
+  "loaderAddress": null,
+  "loadingScreen": "LunarJetman.screen.json",
+  "blocks": {},
+  "entry": null
+}

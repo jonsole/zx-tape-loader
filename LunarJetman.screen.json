@@ -1,0 +1,7 @@
+{
+  "meta": {"version":1},
+  "picture": "LunarJetman.scr",
+  "order": [
+    { "x": 0, "y": 0, "w": 32, "h": 22 }
+  ]
+}

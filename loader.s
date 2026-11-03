@@ -49,13 +49,29 @@ LOADER_SOURCE   DISP LOADER_DEST
                 INCLUDE 'counter.s'
                 ENT                
 LOADER_SIZE     EQU $-LOADER_SOURCE
+                ;; Where the loader runs from: the top of RAM unless the build says otherwise
+                ;; (sjasmplus -DLOADER_AT=$9000 - build_tape.py does this for a tape design).
+                ;; Anywhere in uncontended memory will do; below $8000 the ULA's contention
+                ;; would stretch the cycle-counted bit loop.
+                IFDEF LOADER_AT
+LOADER_DEST     EQU LOADER_AT
+                ELSE
 LOADER_DEST     EQU $FFFF - LOADER_SIZE
+                ENDIF
+                ASSERT LOADER_DEST >= $8000 && LOADER_DEST + LOADER_SIZE <= $10000
             LINE_END
 
+            ;; The CLEAR puts RAMTOP, and the stack the loader runs on, just below this line's
+            ;; number: by default just above BASIC, or wherever the build says (sjasmplus
+            ;; -DSTACK_AT=$FE4D - build_tape.py does this to keep a block's way clear).
             LINE
                 DB CLEAR,'0'
                 DB $0E,$00,$00
+                IFDEF STACK_AT
+                DW STACK_AT
+                ELSE
                 DW BASIC_START + BASIC_LEN + 128
+                ENDIF
                 DB $00,':'
                 DB RANDOMIZE,USR,'0'
                 DB $0E,$00,$00

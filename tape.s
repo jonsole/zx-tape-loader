@@ -17,7 +17,8 @@ LD_LEADER	LD B,0              ; The timing constant.
             INC HL	            ; Count the pair of edges in the H register until '256' pairs have been found.
             JR LD_LEADER
 LD_SYNC     DEC H
-            JP Z,LD_START
+            JP M,LD_START       ; Fewer than 256 leader edges: not a leader yet (JP Z here threw away a
+                                ; good sync after 256-511 edges and took any short pulse before 256)
             CALL LD_EDGE_1	    ; The finishing edge of the 'on' pulse must exist. (Return carry flag reset.)
             JR Z,LD_START
 
@@ -72,9 +73,9 @@ LD_SYNC     DEC H
             LD E,1              ; 7     Load 8 bits (block length LSB)
             CALL C,LD_BITS      ; 17
             LD IXL,E            ; 4     Set LSB of byte counter
-            DEC H
-            JP P,.MEM_BLK
-            JP (IX)
+            DEC H               ; 4     The page is sent one high, so a page of 1 (address $00xx)
+            JP NZ,.MEM_BLK      ; 10    is the end marker - not JP P, which also took every page
+            JP (IX)             ;       from $80 up for the end and jumped to the block's length
 .MEM_BLK    LD E,1              ; 7  Load 8 bits
             CALL LD_BITS        ; 17
             RET NC              ; 5  Exit of error
@@ -108,7 +109,8 @@ LD_BITS:    ; Update border stripe
 
             ; Jump if a long pulse (1 bit)
             LD A,B              ; 4
-            CP -8               ; 7
+            CP -10              ; 7         Long from B=-11: 0s reach -8 and 1s -13, so this splits the gap
+                                ;           (at CP -8 a 0 that arrived one count late read as a 1)
             JP C,.PULSE_1       ; 10 (21)
 
             ; Measure 2nd (short pulse )
