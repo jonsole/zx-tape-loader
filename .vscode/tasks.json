@@ -29,6 +29,49 @@
         },
 
         {
+            "label": "generate lineloader_gen.s",
+            "type": "shell",
+            "command": "python",
+            "args": ["make_lineloader.py", "border.txt", "band.txt"],
+            "problemMatcher": []
+        },
+
+        {
+            "label": "make lineloader (sjasmplus)",
+            "type": "shell",
+            "command": "${config:sjasmplus-dir}/sjasmplus.exe",
+            "args": [
+                "--sld=output/lineloader.sld",
+                "--sym=output/lineloader.sym",
+                "--fullpath",
+                "--lst=output/lineloader.lst",
+                "lineloader.s"
+            ],
+            "dependsOn": "generate lineloader_gen.s",
+            "problemMatcher": {
+                "owner": "sjasmplus",
+                "fileLocation": "autoDetect",
+                "pattern": {
+                    "regexp": "^(.*)\\((\\d+)\\):\\s+(warning|error):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "severity": 3,
+                    "message": 4
+                }
+            },
+            "group": "build"
+        },
+
+        {
+            "label": "build line tape (Lunar Jetman)",
+            "type": "shell",
+            "command": "python",
+            "args": ["build_lunarjetman_line_tape.py"],
+            "dependsOn": "make lineloader (sjasmplus)",
+            "problemMatcher": []
+        },
+
+        {
             "label": "start cspect",
             "type": "shell",
             "command": "CSpect.exe", // For windows users: Remove 'mono' and add 'CSpect.exe' instead
