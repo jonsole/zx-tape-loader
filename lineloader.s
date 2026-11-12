@@ -11,11 +11,12 @@
                 INCLUDE 'lineloader_gen.s'
 
 ;; Memory, all at the top of RAM: by default above $F017, where Lunar Jetman's
-;; image ends, which leaves about 2.4K for the border rows. A busier pattern or a
+;; image ends, which leaves about 2.3K for the border rows. A busier pattern or a
 ;; smaller game can move it down (sjasmplus -DLOADER_QUEUE=$E000), as far as
 ;; $8000: below that the ULA's contention would stretch the lines. The queue
 ;; and the FIFO are not in the image; SCHEDULE must sit $200 above the FIFO
-;; (see TAIL in linetape.s). The image always ends at $FFFF.
+;; (see TAIL in linetape.s). The border's rows come later, on the tape, and can
+;; use everything from the end of the loader to $FFF4.
                 IFDEF LOADER_QUEUE
 QUEUE           EQU LOADER_QUEUE
                 ELSE
@@ -24,7 +25,7 @@ QUEUE           EQU $F100           ; 256-byte ring of decoded bytes
                 ASSERT QUEUE >= $8000 && LOW QUEUE == 0
 FIFO            EQU QUEUE + $100    ; one edge byte a line, 312 a frame
 SCHEDULE        EQU FIFO + $200
-IMAGE_START     EQU FIFO + 312      ; the loader proper, up to $FFFF
+IMAGE_START     EQU FIFO + 312      ; the loader proper
 
 ;; The first byte after the sync.
 LINE_MARKER     EQU $A5
@@ -58,6 +59,10 @@ CODE_START      DI
                 LD DE,IMAGE_START
                 LD BC,LOADER_SIZE
                 LDIR
+                LD HL,STUB_SOURCE
+                LD DE,SYNC_ISR
+                LD BC,STUB_SIZE
+                LDIR
 
                 ; Clear the screen to white ink on black
                 LD HL,$4000
@@ -69,7 +74,7 @@ CODE_START      DI
                 LD BC,767
                 LDIR
 
-                LD A,BORDER_BG
+                XOR A                   ; a black border until the pattern loads
                 OUT ($FE),A
                 JP LOADER_INIT
 
@@ -77,6 +82,17 @@ LOADER_SOURCE   DISP IMAGE_START
                 INCLUDE 'linetape.s'
                 ENT
 LOADER_SIZE     EQU $-LOADER_SOURCE
+
+;; The interrupt lands here (see LOADER_INIT): drop the return address. The
+;; vector is $FFFF, whose JR reads its offset from the ROM's $F3 at $0000.
+STUB_SOURCE     DISP $FFF4
+SYNC_ISR        INC SP
+                INC SP
+                JP (HL)
+                DS $FFFF - $
+                DB $18
+                ENT
+STUB_SIZE       EQU $-STUB_SOURCE
             LINE_END
 
             LINE
@@ -93,3 +109,25 @@ LOADER_SIZE     EQU $-LOADER_SOURCE
 BASIC_LEN  = $-BASIC_START
 
                 TAPEND
+
+;; The border block, for the tape rather than the BASIC: lineborder.bin is a
+;; 5-byte header - where the block loads (COLOURS), the address of BORDER_JP's
+;; low byte and the byte that switches it to the rows - then the block itself,
+;; the colours and the rows from make_lineloader.py. loader.py's
+;; build_line_tape sends it first, then the switch, so the pattern starts in
+;; the frame after it has all arrived. Assembled in spare device memory; only
+;; the file is used.
+                ORG $8000
+BORDER_FILE     DW COLOURS, BORDER_JP + 1
+                DB LOW BORDER_ROWS
+                DISP COLOURS
+                BORDER_COLOURS
+                ASSERT $ == BORDER_ROWS_AT
+BORDER_ROWS     BORDER_ROWS
+BORDER_END
+                IF BORDER_END > $FFF4
+                DISPLAY "The border's rows are ", /D, BORDER_END - $FFF4, " bytes too big: move the loader down with -DLOADER_QUEUE"
+                ENDIF
+                ASSERT BORDER_END <= $FFF4
+                ENT
+                SAVEBIN "lineborder.bin", BORDER_FILE, 5 + BORDER_END - COLOURS

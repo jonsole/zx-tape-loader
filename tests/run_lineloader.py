@@ -25,7 +25,7 @@ import sys
 import z80
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from loader import TapeGenerator, wow_flutter_speed  # noqa: E402
+from loader import TapeGenerator, line_border_blocks, wow_flutter_speed  # noqa: E402
 
 FRAME = 69888
 LINE = 224
@@ -155,6 +155,8 @@ def main():
     ap.add_argument('--jitter', type=float, default=0.0, help='random error on each pulse, a fraction')
     ap.add_argument('--speed', type=float, default=1.0, help='tape speed, 1 is nominal')
     ap.add_argument('--seed', type=int, default=1)
+    ap.add_argument('--border', default='lineborder.bin',
+                    help="the border block (the default), or 'none' for a black border throughout")
     args = ap.parse_args()
 
     rnd = random.Random(args.seed)
@@ -166,6 +168,8 @@ def main():
     screen = bytes(rnd.choice([0, 0, 0, rnd.randrange(256)]) for _ in range(6912))
     code = bytes([0] * (args.bytes // 2)) + bytes(rnd.randrange(256) for _ in range(args.bytes // 2))
     blocks = [(0x4000, screen), (0x8000, code)]
+    if args.border != 'none':
+        blocks = line_border_blocks(args.border) + blocks
     entry = 0x8000
 
     gen = TapeGenerator()

@@ -25,6 +25,8 @@ with `$F3` at `$0000` and `$FF` from `$3900`), against a tape synthesized with
   paper;
 - both blocks arrive byte for byte, and it jumps to the entry address.
 
+The tape starts with the border block (`--border none` leaves it out, for a black border
+throughout), so the runs cover the blank border, the switch and the pattern's rows.
 `--flutter` puts `loader.py`'s wow and flutter on the pulses, `--jitter` a random
 error on each one, `--speed` runs the tape fast or slow. All pass at
 `--jitter 0.15`, `--speed 0.9` and `--speed 1.12` (each with `--jitter 0.1`), and
@@ -60,7 +62,9 @@ What it showed, and what `lineloader.s` and `make_lineloader.py` take from it:
 - The whole of Lunar Jetman, from `linetape.tzx` and from `linetape.wav` (wow and
   flutter included, the BASIC's standard-speed blocks playing first), loads byte
   for byte; every line routine starts 144 T-states into its line on every one
-  of ~4,000 frames, and `PRE` at frame T-state 3280 on every frame.
+  of ~3,500 frames, and `PRE` at frame T-state 3280 on every frame. The top
+  border is black until the border block's switch byte arrives (about frame
+  700 of the `.wav`) and matches `border.txt` from then on.
 - The border, compared cell by cell with `border.txt`, is exact. `OUT_WRITE = 9`
   in `make_lineloader.py` is the timing that puts each OUT's write in the
   middle of its cell; with it the pattern is still exact with the whole loop

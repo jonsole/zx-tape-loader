@@ -249,7 +249,9 @@ I_EMPTY         PAD 83 + HANDLER_T - 62 - 10
                 JP I_DONE               ; 83 + HANDLER_T
 
 ;; PRE: the line before the border. Rewinds the FIFO for the new frame, saves
-;; the alternate set and loads the first colours.
+;; the alternate set, loads the border's colours from COLOURS (B' D' E' H' L'
+;; and, in A', the background for POST) and jumps to the border rows: the black
+;; loop until the tape's border block has replaced BORDER_JP's low byte.
 PRE             HEAD_AT FIFO + 0        ; 36
                 LD SP,FIFO              ; 46
                 LD DE,FIFO + 50         ; 56
@@ -258,10 +260,15 @@ PRE             HEAD_AT FIFO + 0        ; 36
                 LD (SAVE_DE),DE         ; 100
                 LD (SAVE_HL),HL         ; 116
                 LD C,$FE                ; 123
-                BORDER_INIT             ; 158
-                EXX                     ; 162
-                PAD 224 - 162 - 10
-                JP BORDER_START         ; 224
+                LD HL,(COLOURS)         ; 139  L', H'
+                LD DE,(COLOURS + 2)     ; 159  E', D'
+                LD A,(COLOURS + 4)      ; 172
+                LD B,A                  ; 176  B'
+                LD A,(COLOURS + 5)      ; 189
+                EX AF,AF'               ; 193  the background, for POST
+                EXX                     ; 197
+                PAD 224 - 197 - 10
+BORDER_JP       JP BLANK_ROW0           ; 224
 
                 ASSERT HIGH Z_LINE == LINES_PAGE && HIGH I_LINE == LINES_PAGE
                 ASSERT HIGH D_LINE == LINES_PAGE && HIGH PRE == LINES_PAGE
@@ -323,27 +330,63 @@ D_LINE          HEAD                    ; 36
 .done           PAD 224 - 160 - 39
                 TAIL
 
-;; The border rows, from make_lineloader.py: each the head (to FIFO + 1 + row),
-;; EXX, its OUTs, EXX.
-BORDER_START    BORDER_ROWS
-
 ;; POST: the first paper line. Puts the border's background back and the
 ;; alternate set.
 POST            HEAD_AT FIFO + 49       ; 36
-                LD A,BORDER_BG          ; 43
-                OUT ($FE),A             ; 54
-                EXX                     ; 58
-                LD BC,(SAVE_BC)         ; 78
-                LD DE,(SAVE_DE)         ; 98
-                LD HL,(SAVE_HL)         ; 114
-                EXX                     ; 118
-                PAD 224 - 118 - 39
+                EX AF,AF'               ; 40  the background, from PRE
+                OUT ($FE),A             ; 51
+                EXX                     ; 55
+                LD BC,(SAVE_BC)         ; 75
+                LD DE,(SAVE_DE)         ; 95
+                LD HL,(SAVE_HL)         ; 111
+                EXX                     ; 115
+                PAD 224 - 115 - 39
                 TAIL
 
 ;; After the handler: back to the main set and on to the next line.
 I_DONE          EXX                     ; 87 + HANDLER_T
                 PAD 224 - 39 - 87 - HANDLER_T
                 TAIL
+
+;; ===========================================================================
+;; The border until the tape brings its pattern: 48 rows of black, each one the
+;; head (its FIFO slot through H') and nothing else. B' counts the rows.
+;; BLANK_ROW0 and BORDER_ROWS must share a page, so that BORDER_JP switches
+;; from one to the other with its low byte alone, in one write between frames.
+                IF HIGH $ != HIGH ($ + 64)
+                DS 256 - LOW $
+                ENDIF
+BLANK_ROW0      HEAD_AT FIFO + 1        ; 36
+                EXX                     ; 40
+                LD HL,FIFO + 2          ; 50
+                LD B,47                 ; 57
+                EXX                     ; 61
+                PAD 224 - 61 - 10
+                JP BLANK_ROW            ; 224
+BLANK_ROW       IN A,($FE)              ; 11
+                XOR C                   ; 15
+                EXX                     ; 19
+                LD (HL),A               ; 26
+                INC HL                  ; 32
+                EXX                     ; 36
+                XOR C                   ; 40
+                LD C,A                  ; 44
+                PAD 224 - 44 - 32
+                EXX                     ; 196
+                DEC B                   ; 200
+                EXX                     ; 204
+                JP Z,BLANK_END          ; 214
+                JP BLANK_ROW            ; 224
+BLANK_END       JP POST                 ; (the last row's 10 T-states, as the JP above)
+
+;; The border's colours as PRE loads them: L', H', E', D', B', then the
+;; background. All 0 (black) until the tape's border block brings its own.
+COLOURS         DB 0, 0, 0, 0, 0, 0
+
+;; Where the border block's rows go, straight after COLOURS. Until then this
+;; holds LOADER_INIT, which has run by the time anything is loaded.
+BORDER_ROWS_AT
+                ASSERT HIGH BLANK_ROW0 == HIGH BORDER_ROWS_AT
 
 ;; ===========================================================================
 ;; Start: called from the BASIC with interrupts off and the screen cleared.
@@ -383,16 +426,4 @@ LOADER_INIT     LD (SAVED_SP),SP
                 LD C,0                  ; 7
                 JP PRE                  ; 10
 
-                IF $ > $FFF4
-                DISPLAY "The loader is ", /D, $ - $FFF4, " bytes too big: move it down with -DLOADER_QUEUE"
-                ENDIF
-                ASSERT $ <= $FFF4
-                DS $FFF4 - $
-
-;; The interrupt lands here (see LOADER_INIT): drop the return address.
-SYNC_ISR        INC SP
-                INC SP
-                JP (HL)
-                DS $FFFF - $
-                DB $18                  ; JR, its offset at $0000
-                ASSERT $ == $10000
+IMAGE_END

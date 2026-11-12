@@ -38,7 +38,7 @@ with simulated wow and flutter.
 - **`lineloader.s` / `linetape.s`** — A second loader that locks to the beam: every scanline
   is a 224 T-state chunk that samples the tape, and the 48 top-border lines draw a fixed
   pattern from `border.txt` (compiled into OUT instructions by `make_lineloader.py`) while
-  the rest decode. Built into a tape by `build_lunarjetman_line_tape.py`.
+  the rest decode. The pattern itself is the first block it loads. Built into a tape by `build_lunarjetman_line_tape.py`.
 
 See [CLAUDE.md](CLAUDE.md) for a deeper architectural writeup.
 
@@ -82,16 +82,17 @@ real Spectrum's tape input (or a cassette deck to make an actual tape).
 
 ```sh
 python make_lineloader.py border.txt     # the pattern -> lineloader_gen.s
-sjasmplus lineloader.s                   # -> lineloader.tap
+sjasmplus lineloader.s                   # -> lineloader.tap, lineborder.bin
 python build_lunarjetman_line_tape.py    # -> linetape.tzx, linetape.wav
 ```
 
 `border.txt` is 48 rows (scanlines 16-63) of 44 cells, each 8 pixels across the whole visible
 width, `0`-`7` or `.` for the background. Colour changes need three cells between them (more
 next to a colour that isn't one of the five used most), and the generator says which row and
-cells when they don't fit. The fast part loads at the same average speed as the first loader,
-but the loader itself is about 3.3K, most of it the border's code, so its BASIC block takes
-about 20 seconds at standard speed rather than 3.
+cells when they don't fit. The fast part loads at the same average speed as the first loader.
+The BASIC carries only the loader (about 1.1K, 6.5 seconds at standard speed), which starts
+with a black border; the pattern's code is the first thing the fast loader brings, about 3
+seconds, and it appears as soon as that has arrived.
 
 ### Converting another tape
 

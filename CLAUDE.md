@@ -224,7 +224,7 @@ draws a pattern in the top border while it loads. Build:
 
 ```
 python make_lineloader.py border.txt      # border.txt -> lineloader_gen.s
-sjasmplus --sym=output/lineloader.sym --lst=output/lineloader.lst lineloader.s   # -> lineloader.tap
+sjasmplus --sym=output/lineloader.sym --lst=output/lineloader.lst lineloader.s   # -> lineloader.tap, lineborder.bin
 python build_lunarjetman_line_tape.py      # -> linetape.tzx, linetape.wav, lineaudio.wav
 ```
 
@@ -238,9 +238,10 @@ head: `IN A,($FE)` (at `LINE_START`, 144 T-states into the line, in the horizont
 XOR with the last sample (bit 6 set = an edge), store that on a FIFO. What the rest of the
 chunk does is set by its place in the frame:
 
-- `PRE` (scanline 15) rewinds the FIFO, saves the alternate registers and loads the
-  border's colours into them; 48 border rows (scanlines 16-63) draw the pattern with
-  `OUT (C),r`; `POST` (scanline 64) puts the alternate set back.
+- `PRE` (scanline 15) rewinds the FIFO, saves the alternate registers, loads the
+  border's colours into them from `COLOURS` and jumps through `BORDER_JP` to 48 border rows
+  (scanlines 16-63); `POST` (scanline 64) sets the background and puts the alternate set
+  back.
 - The other 262 are `D` (pop two FIFO entries with one `POP AF` - the older's edge is the Z
   flag, the newer's bit 6 goes to S with `ADD A,A` - and decode them), `Z` (paper lines that
   decode nothing: spare for effects) or `I` (take one decoded byte off a queue and act on it).
@@ -267,6 +268,18 @@ to the length). `loader.py`'s `line_byte`/`line_leader`/`line_mem_header`/`line_
 and `build_line_tape` are the encoder; `write_tzx` writes the fast part as one ID $19 block
 with a one-pulse-a-bit alphabet.
 
+**Two stages.** The BASIC carries only the loader (`lineloader.tap`, about 1.1K), whose
+border is `BLANK_ROW0`/`BLANK_ROW`: 48 rows that sample and draw nothing, so it starts black.
+The pattern's rows are assembled separately, after `TAPEND`, into `lineborder.bin` (a 5-byte
+header - load address, the address of `BORDER_JP`'s low byte, the byte for it - then
+`COLOURS` and the rows), and `loader.py`'s `build_line_tape` (`line_border_blocks`) sends them
+as the first fast block, into `BORDER_ROWS_AT`, which held the spent `LOADER_INIT`. Then a
+one-byte block rewrites `BORDER_JP`'s low byte: `BLANK_ROW0` and the rows share a page so one
+byte switches them, and the I lines write it below the paper, so the pattern starts on a
+whole frame. The rows end with `JP POST` (the generator ends the last row 10 T-states early);
+`SYNC_ISR` and the `JR` at `$FFFF` are copied up separately, so the image doesn't carry the
+space the rows will use.
+
 **Sync.** IM 2 with `I = $39`: the 48K ROM's spare bytes there are `$FF`, so the vector is
 `$FFFF`, where the loader's last byte is a `JR` whose offset is the ROM's `$F3` at `$0000`,
 landing on `SYNC_ISR` at `$FFF4`. Two HALTs (the first may land anywhere in INT's 32 T-states),
@@ -282,16 +295,18 @@ any chunk that isn't 224.
 
 **The border pattern** (`border.txt`, compiled by `make_lineloader.py`): 48 rows of 44 cells,
 8 pixels (4 T-states) each across the whole visible width. The five most used colours stay in
-`B' D' E' H' L'` for the frame (`C' = $FE`); a change to one is `OUT (C),r` (12T, so changes at
+`B' D' E' H' L'` for the frame (`C' = $FE`, the colours from `COLOURS`, whose sixth byte is
+the background `POST` sets via `A'`); a change to one is `OUT (C),r` (12T, so changes at
 least three cells apart), to any other `LD A,n`/`OUT ($FE),A` (18T). The last three cells of a
 row can't change (the next head is running). Each OUT is placed for its write to land in the
 middle of its cell's 4 T-states (`OUT_WRITE = 9`, measured), so a ULA a T-state early or late
-draws the same picture; the generator says when a crowded row can't be. Memory: the image runs
-from `QUEUE + $238` to `$FFFF` (default `QUEUE = $F100`, above Lunar Jetman's `$F017`, leaving
-about 2.3K for the rows); `sjasmplus -DLOADER_QUEUE=$E000` moves it down for a busier pattern.
+draws the same picture; the generator says when a crowded row can't be. Memory: the loader runs
+from `QUEUE + $238` (default `QUEUE = $F100`, above Lunar Jetman's `$F017`) and the rows from
+`BORDER_ROWS_AT` to `$FFF4`, about 2.3K; `sjasmplus -DLOADER_QUEUE=$E000` moves it all down for
+a busier pattern.
 
-**Cost.** The loader rides in the BASIC's REM at standard speed, and at about 3.3K (most of
-it the border rows) that block takes about 20 seconds to load, against 3 for `loader.tap`.
+**Cost.** The BASIC block is about 1.1K, about 6.5 seconds at standard speed (3 for
+`loader.tap`); the pattern then takes about 3 seconds at the fast loader's speed.
 
 **Testing.** `tests/README.md`: `run_lineloader.py` (the `z80` package, `pip install z80`) for
 224-T-state lines, contention windows and decoding under flutter, jitter and speed error;
@@ -304,7 +319,7 @@ border's pixels and whole tapes.
   `build_lunarjetman_tape.py`'s `gen_block` calls, whose x/y/w/h regions describe the screen layout
   to send.
 - `loader.tap` — generated tape image (see Build, above).
-- `border.txt` — the line-locked loader's top-border pattern; `lineloader_gen.s` and
-  `lineloader.tap` are generated from it and `lineloader.s`.
+- `border.txt` — the line-locked loader's top-border pattern; `lineloader_gen.s`,
+  `lineloader.tap` and `lineborder.bin` are generated from it and `lineloader.s`.
 - `output/` — build artifacts (`.lst` listing, `.sld` debug symbols, `.sna` snapshot for DeZog);
   regenerated by the build task except `.sna`, which is produced by saving emulator state.

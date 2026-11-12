@@ -670,14 +670,29 @@ def build_fast_tape(source_path, loader_tap='loader.tap', entry_address=None,
     return gen
 
 
-def build_line_tape(blocks, entry_address, loader_tap='lineloader.tap'):
+def line_border_blocks(path='lineborder.bin'):
+    """The blocks that bring the line-locked loader's border pattern, from the
+    lineborder.bin that assembling lineloader.s writes: its colours and rows,
+    then one byte that points PRE's jump at the rows. Until that byte arrives
+    the loader draws a black border, so the rows can load in safety; the byte
+    is written between frames, so the pattern starts on a whole frame."""
+    with open(path, 'rb') as f:
+        data = f.read()
+    at, switch_at, switch = struct.unpack('<HHB', data[:5])
+    return [(at, data[5:]), (switch_at, bytes([switch]))]
+
+
+def build_line_tape(blocks, entry_address, loader_tap='lineloader.tap', border='lineborder.bin'):
     """A tape for the line-locked loader: lineloader.tap's BASIC at standard
-    speed, then `blocks` - (address, bytes) pairs, loaded in order - and a jump
+    speed, then the border pattern (`border`, None for a black border all the
+    way), then `blocks` - (address, bytes) pairs, loaded in order - and a jump
     to `entry_address`. A loading screen is just a block at $4000; it appears
     a scanline's worth of bits at a time, top third first."""
     gen = TapeGenerator()
     encode_tap_file(gen, loader_tap)
     gen.line_leader()
+    if border is not None:
+        blocks = line_border_blocks(border) + list(blocks)
     for address, data in blocks:
         gen.line_mem_header(address, len(data))
         for d in data:
