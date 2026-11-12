@@ -1,6 +1,9 @@
 # Generated tape audio (regenerate with `python build_lunarjetman_tape.py`)
 audio.wav
 tape.wav
+lineaudio.wav
+linetape.wav
+linetape.tzx
 
 # Build output (regenerate with the "make (sjasmplus)" task)
 output/

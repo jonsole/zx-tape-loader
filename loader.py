@@ -11,6 +11,14 @@ SAMPLE_RATE = 44307  # Samples/sec used for pulse-width timing math
 BIT_T = (69888 / 8) / 13
 OUTPUT_RATE = 44100  # Samples/sec the WAV file itself is written/read at
 
+# The line-locked loader (lineloader.s): it samples the tape once a scanline,
+# and every pulse is one bit - a 0 a line and a half long, a 1 four and a half.
+# It reads a pulse of three samples or more as a 1, so either can be a third out.
+LINE_T = 224
+LINE_SHORT = 1.5 * LINE_T
+LINE_LONG = 4.5 * LINE_T
+LINE_MARKER = 0xA5   # lineloader.s's LINE_MARKER: the byte after the sync
+
 TYPE_PROGRAM = 0
 TYPE_NUMBER_ARRAY = 1
 TYPE_CHARACTER_ARRAY = 2
@@ -98,6 +106,46 @@ class TapeGenerator:
             else:
                 self._raw_pulse(BIT_T / 2)
                 self._raw_pulse(BIT_T / 2)
+
+    def line_byte(self, b, num_bits=8):
+        """Bits for the line-locked loader, most significant first: one pulse
+        each, LINE_SHORT for a 0 and LINE_LONG for a 1."""
+        for i in range(num_bits, 0, -1):
+            bit = 1 if b & (1 << (i - 1)) else 0
+            self._note('line_bits', bit)
+            self._raw_pulse(LINE_LONG if bit else LINE_SHORT)
+
+    def line_leader(self, pulses=6144):
+        """The line-locked loader's leader, sync and marker. The leader is 0
+        bits, which leave linetape.s waiting; the first 1 starts a byte, and
+        that byte must be LINE_MARKER or it goes back to waiting. 6144 pulses
+        is about 0.6s, comfortably longer than BASIC takes to start the loader
+        and the loader takes to sync to the frame."""
+        self._note('pilot', (LINE_SHORT, pulses))
+        for _ in range(pulses):
+            self._raw_pulse(LINE_SHORT)
+        self.line_byte(1, 1)
+        self.line_byte(LINE_MARKER)
+
+    def line_mem_header(self, address, len):
+        """A block's header for the line-locked loader: the same as mem_header's
+        (the address a page high, then the length), in its bits."""
+        if not 0x100 <= address <= 0xFFFF:
+            raise ValueError(f"a block can't load at ${address:04X}: page $00 is the ROM, and "
+                             "its header would read as the end marker")
+        if not 1 <= len <= 0x10000 - address:
+            raise ValueError(f"a block of {len} bytes doesn't fit at ${address:04X}")
+        self.line_byte((address + 256) & 0xFFFF, 16)
+        self.line_byte(len, 16)
+
+    def line_end_blocks(self, entry_address, tail=32):
+        """The end marker (a page of 0, sent as 1) and the entry address, then
+        a tail: a pulse is only measured when the edge after it arrives, so the
+        last bit needs at least one more."""
+        self.line_byte(0x0100, 16)
+        self.line_byte(entry_address, 16)
+        for _ in range(tail):
+            self.line_byte(0, 1)
 
     def fast_leader(self, pulses=1024):
         """The leader and sync the fast loader waits for. tape.s's LD_SYNC only
@@ -622,6 +670,23 @@ def build_fast_tape(source_path, loader_tap='loader.tap', entry_address=None,
     return gen
 
 
+def build_line_tape(blocks, entry_address, loader_tap='lineloader.tap'):
+    """A tape for the line-locked loader: lineloader.tap's BASIC at standard
+    speed, then `blocks` - (address, bytes) pairs, loaded in order - and a jump
+    to `entry_address`. A loading screen is just a block at $4000; it appears
+    a scanline's worth of bits at a time, top third first."""
+    gen = TapeGenerator()
+    encode_tap_file(gen, loader_tap)
+    gen.line_leader()
+    for address, data in blocks:
+        gen.line_mem_header(address, len(data))
+        for d in data:
+            gen.line_byte(d)
+    gen.line_end_blocks(entry_address)
+    gen.pulse(1000000)
+    return gen
+
+
 def write_wav(samples, path, output_rate=OUTPUT_RATE):
     with wave.open(path, "w") as wav_file:
         wav_file.setnchannels(1)
@@ -662,7 +727,7 @@ def _tzx_pulses(lengths):
     return bytes(out)
 
 
-def _tzx_generalized(pilot, bits):
+def _tzx_generalized(pilot, bits, zero=None, one=None):
     """The fast encoding as one generalized data block (ID $19), the .tzx block
     made for loaders whose bits are not two pulses each: it spells out its own
     alphabet - here a 1 bit is one pulse of BIT_T and a 0 two of half that -
@@ -690,8 +755,10 @@ def _tzx_generalized(pilot, bits):
     for length, count in tones:
         body += bytes([alphabet.index(length)]) + struct.pack('<H', count)
     half = int(round(BIT_T / 2))
-    body += bytes([0]) + struct.pack('<HH', half, half)            # a 0 bit
-    body += bytes([0]) + struct.pack('<HH', int(round(BIT_T)), 0)  # a 1 bit, one pulse long
+    zero = zero or (half, half)                                    # a 0 bit
+    one = one or (int(round(BIT_T)), 0)                            # a 1 bit, one pulse long
+    body += bytes([0]) + struct.pack('<HH', *(int(round(p)) for p in zero))
+    body += bytes([0]) + struct.pack('<HH', *(int(round(p)) for p in one))
     packed = bytearray()
     for at in range(0, len(bits), 8):
         byte = 0
@@ -721,8 +788,13 @@ def write_tzx(gen, path):
         elif kind == 'pilot' and at + 1 < len(segments) and segments[at + 1][0] == 'bits':
             out += _tzx_generalized(items, segments[at + 1][1])
             at += 1
+        elif kind == 'pilot' and at + 1 < len(segments) and segments[at + 1][0] == 'line_bits':
+            out += _tzx_generalized(items, segments[at + 1][1], (LINE_SHORT, 0), (LINE_LONG, 0))
+            at += 1
         elif kind == 'bits':
             out += _tzx_generalized([], items)
+        elif kind == 'line_bits':
+            out += _tzx_generalized([], items, (LINE_SHORT, 0), (LINE_LONG, 0))
         elif kind == 'pilot':
             out += _tzx_pulses([length for length, count in items for _ in range(count)])
         else:
