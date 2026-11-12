@@ -22,8 +22,11 @@ with `$F3` at `$0000` and `$FF` from `$3900`), against a tape synthesized with
 - every sample (the `IN` at the top of each chunk) comes exactly 224 T-states
   after the one before, for the whole load;
 - no `IN` and no write to `$4000-$7FFF` falls while the ULA is fetching the
-  paper;
-- both blocks arrive byte for byte, and it jumps to the entry address.
+  paper (judged where the loader means its lines to be: the `z80` package has
+  no ULA to hold the sync's read of `$4000`, so its frame sits a few T-states
+  off, and the check shifts by that);
+- both blocks arrive byte for byte, apart from the attribute band's area, which
+  the band rewrites, and it jumps to the entry address.
 
 The tape starts with the border block (`--border none` leaves it out, for a black border
 throughout), so the runs cover the blank border, the switch and the pattern's rows.
@@ -65,6 +68,10 @@ What it showed, and what `lineloader.s` and `make_lineloader.py` take from it:
   of ~3,500 frames, and `PRE` at frame T-state 3280 on every frame. The top
   border is black until the border block's switch byte arrives (about frame
   700 of the `.wav`) and matches `border.txt` from then on.
+- Over 500 frames, every scanline of the attribute band is one colour, the
+  colours run down the band in `band.txt`'s order, and they move one scanline a
+  frame; the band's lines start at T-state 144 like the rest, so none of its
+  writes is held.
 - The border, compared cell by cell with `border.txt`, is exact. `OUT_WRITE = 9`
   in `make_lineloader.py` is the timing that puts each OUT's write in the
   middle of its cell; with it the pattern is still exact with the whole loop

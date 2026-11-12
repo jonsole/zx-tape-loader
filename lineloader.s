@@ -24,6 +24,12 @@ QUEUE           EQU $F100           ; 256-byte ring of decoded bytes
                 ENDIF
                 ASSERT QUEUE >= $8000 && LOW QUEUE == 0
 FIFO            EQU QUEUE + $100    ; one edge byte a line, 312 a frame
+BAND_VAL        EQU QUEUE - $80     ; the band's colours, 128 (from the tape)
+BAND_ROWLO      EQU QUEUE - $C0     ; each band line's row end, 64 (LOADER_INIT)
+                ASSERT BAND_ROWLO >= $8000
+                ASSERT HIGH BAND_VAL == HIGH (BAND_VAL + 127)   ; INC C walks it
+BAND_LINES      EQU 64              ; rows 0-7 of the paper
+BAND_ROW0_END   EQU $5800 + BAND_X + 14
 SCHEDULE        EQU FIFO + $200
 IMAGE_START     EQU FIFO + 312      ; the loader proper
 
@@ -111,15 +117,17 @@ BASIC_LEN  = $-BASIC_START
                 TAPEND
 
 ;; The border block, for the tape rather than the BASIC: lineborder.bin is a
-;; 5-byte header - where the block loads (COLOURS), the address of BORDER_JP's
-;; low byte and the byte that switches it to the rows - then the block itself,
-;; the colours and the rows from make_lineloader.py. loader.py's
-;; build_line_tape sends it first, then the switch, so the pattern starts in
-;; the frame after it has all arrived. Assembled in spare device memory; only
-;; the file is used.
+;; 9-byte header - where the block loads (COLOURS), the address of BORDER_JP's
+;; low byte and the byte that switches it to the rows, where the band's colours
+;; load and the block's length - then the block itself (the colours and the
+;; rows from make_lineloader.py), then the band's 128 colours. loader.py's
+;; build_line_tape sends the block first, then the switch, so the pattern
+;; starts in the frame after it has all arrived, then the band's colours.
+;; Assembled in spare device memory; only the file is used.
                 ORG $8000
 BORDER_FILE     DW COLOURS, BORDER_JP + 1
                 DB LOW BORDER_ROWS
+                DW BAND_VAL, BORDER_END - COLOURS
                 DISP COLOURS
                 BORDER_COLOURS
                 ASSERT $ == BORDER_ROWS_AT
@@ -130,4 +138,5 @@ BORDER_END
                 ENDIF
                 ASSERT BORDER_END <= $FFF4
                 ENT
-                SAVEBIN "lineborder.bin", BORDER_FILE, 5 + BORDER_END - COLOURS
+                BAND_TABLE
+                SAVEBIN "lineborder.bin", BORDER_FILE, 9 + BORDER_END - COLOURS + 128

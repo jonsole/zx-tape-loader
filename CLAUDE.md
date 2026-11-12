@@ -220,10 +220,11 @@ CLI) when a source tape doesn't follow this convention.
 ## Line-locked loader (`lineloader.s`, `linetape.s`, `make_lineloader.py`)
 
 A second, separate loader (it shares only `basic.s` and `loader.py` with the first) that
-draws a pattern in the top border while it loads. Build:
+draws a pattern in the top border, and raster bars in the attributes of the screen's top 8
+rows, while it loads. Build:
 
 ```
-python make_lineloader.py border.txt      # border.txt -> lineloader_gen.s
+python make_lineloader.py border.txt band.txt   # -> lineloader_gen.s
 sjasmplus --sym=output/lineloader.sym --lst=output/lineloader.lst lineloader.s   # -> lineloader.tap, lineborder.bin
 python build_lunarjetman_line_tape.py      # -> linetape.tzx, linetape.wav, lineaudio.wav
 ```
@@ -240,17 +241,21 @@ chunk does is set by its place in the frame:
 
 - `PRE` (scanline 15) rewinds the FIFO, saves the alternate registers, loads the
   border's colours into them from `COLOURS` and jumps through `BORDER_JP` to 48 border rows
-  (scanlines 16-63); `POST` (scanline 64) sets the background and puts the alternate set
-  back.
-- The other 262 are `D` (pop two FIFO entries with one `POP AF` - the older's edge is the Z
+  (scanlines 16-63); `POST` (scanline 64) sets the background and starts the attribute
+  band, 65 lines (`BAND_LOOP` ... `BAND_END`, to scanline 128), which puts the alternate set
+  back at `BAND_EXIT`.
+- The other 198 are `D` (pop two FIFO entries with one `POP AF` - the older's edge is the Z
   flag, the newer's bit 6 goes to S with `ADD A,A` - and decode them), `Z` (paper lines that
   decode nothing: spare for effects) or `I` (take one decoded byte off a queue and act on it).
-  `SCHEDULE` (from `make_lineloader.py`) says which: 156 D lines so a frame's 312 samples are
-  all decoded by its end, and the 32 I lines all off the paper. Each line ends with `TAIL`,
+  `SCHEDULE` (from `make_lineloader.py`, from slot 114, after the band) says which: 156 D
+  lines so a frame's 312 samples are all decoded by its end - 117 of the 127 paper lines after
+  the band, the backlog of 115 samples the border and band leave giving them room - and the 32
+  I lines all off the paper. Each line ends with `TAIL`,
   which jumps through `SCHEDULE[slot]`, `$200` above the FIFO slot DE points at.
 
-**Contention.** On the paper lines nothing touches contended memory and the one I/O, the IN,
-is in the horizontal blank, so the ULA never holds a chunk. That is why bytes are only
+**Contention.** On the paper lines nothing touches contended memory while the ULA is
+fetching (79 to 206 T-states into a paper line) - the one I/O, the IN, is in the horizontal
+blank, and the band's writes are placed around it - so the ULA never holds a chunk. That is why bytes are only
 *written* from I lines, above and below the paper: D lines append finished bytes to a queue
 (`QUEUE`, page-aligned, `IX` writes and `D'E'` reads), and the I lines' handlers
 (`H_MARK`, `H_ADDR_HI` ... `H_DATA`, one chosen by self-modifying `STATE_JP`) store them.
@@ -268,15 +273,33 @@ to the length). `loader.py`'s `line_byte`/`line_leader`/`line_mem_header`/`line_
 and `build_line_tape` are the encoder; `write_tzx` writes the fast part as one ID $19 block
 with a one-pulse-a-bit alphabet.
 
-**Two stages.** The BASIC carries only the loader (`lineloader.tap`, about 1.1K), whose
-border is `BLANK_ROW0`/`BLANK_ROW`: 48 rows that sample and draw nothing, so it starts black.
-The pattern's rows are assembled separately, after `TAPEND`, into `lineborder.bin` (a 5-byte
-header - load address, the address of `BORDER_JP`'s low byte, the byte for it - then
-`COLOURS` and the rows), and `loader.py`'s `build_line_tape` (`line_border_blocks`) sends them
-as the first fast block, into `BORDER_ROWS_AT`, which held the spent `LOADER_INIT`. Then a
+**The attribute band** (`band.txt`: its first column and one attribute a scanline). Rows 0-7
+of the paper, 14 columns from `BAND_X`, are rewritten every scanline with that scanline's
+colour from `BAND_VAL` (128 bytes: the pattern over and over), starting `BAND_PHASE` in and
+moving a scanline a frame (`BAND_WRAP`, the largest multiple of the pattern's length up to 64,
+keeps it seamless). A scanline's attributes must be written after the ULA read them for the
+line before, before it reads them for this one (column x at about 82 + 4x), and outside its
+fetches (79-206), so each band line's seven PUSHes sit at the turn of the line: one at 213 of
+the line before (`BAND_TAIL`, after `LD SP,H'L'` from `BAND_ROWLO`), then the IN at 0 and six
+more, the last written at 74; the rest of the head follows them. That is the whole width it
+can do - 14 columns. Line 0 can't be done in the line before it (that's the last border row),
+so `BAND_EXIT`/`BAND_END` write it for next frame (`BAND_V0`, saved by `POST`). In the band,
+HL is the colour (`BAND_SAVE_HL` keeps the decoder's), B counts lines, `B'C'`/`D'E'`/`H'L'`
+walk the tables, and SP is put back as `FIFO`, since no D line has run yet that frame. The
+band replaces the loading screen's own attributes in its area, and leaves its colours there.
+`BAND_VAL` and `BAND_ROWLO` sit just below `QUEUE`; `LOADER_INIT` fills `BAND_ROWLO` and blacks
+out `BAND_VAL` until the tape brings it.
+
+**Two stages.** The BASIC carries only the loader (`lineloader.tap`, about 1.3K), whose
+border is `BLANK_ROW0`/`BLANK_ROW`: 48 rows that sample and draw nothing, so it starts black,
+and whose band is black. The pattern's rows are assembled separately, after `TAPEND`, into
+`lineborder.bin` (a 9-byte header - load address, the address of `BORDER_JP`'s low byte, the
+byte for it, `BAND_VAL`'s address, the rows' length - then `COLOURS` and the rows, then the
+band's 128 colours), and `loader.py`'s `build_line_tape` (`line_border_blocks`) sends them as
+the first fast block, into `BORDER_ROWS_AT`, which held the spent `LOADER_INIT`. Then a
 one-byte block rewrites `BORDER_JP`'s low byte: `BLANK_ROW0` and the rows share a page so one
 byte switches them, and the I lines write it below the paper, so the pattern starts on a
-whole frame. The rows end with `JP POST` (the generator ends the last row 10 T-states early);
+whole frame, and a third block brings the band's colours. The rows end with `JP POST` (the generator ends the last row 10 T-states early);
 `SYNC_ISR` and the `JR` at `$FFFF` are copied up separately, so the image doesn't carry the
 space the rows will use.
 
@@ -305,13 +328,13 @@ from `QUEUE + $238` (default `QUEUE = $F100`, above Lunar Jetman's `$F017`) and 
 `BORDER_ROWS_AT` to `$FFF4`, about 2.3K; `sjasmplus -DLOADER_QUEUE=$E000` moves it all down for
 a busier pattern.
 
-**Cost.** The BASIC block is about 1.1K, about 6.5 seconds at standard speed (3 for
+**Cost.** The BASIC block is about 1.3K, about 7.5 seconds at standard speed (3 for
 `loader.tap`); the pattern then takes about 3 seconds at the fast loader's speed.
 
 **Testing.** `tests/README.md`: `run_lineloader.py` (the `z80` package, `pip install z80`) for
 224-T-state lines, contention windows and decoding under flutter, jitter and speed error;
 `zx_emulator_run.cpp` (links the ZX Spectrum emulator's `zx_core`) for real contention, the
-border's pixels and whole tapes.
+border's and band's pixels and whole tapes.
 
 ## Working assets
 
@@ -319,7 +342,8 @@ border's pixels and whole tapes.
   `build_lunarjetman_tape.py`'s `gen_block` calls, whose x/y/w/h regions describe the screen layout
   to send.
 - `loader.tap` — generated tape image (see Build, above).
-- `border.txt` — the line-locked loader's top-border pattern; `lineloader_gen.s`,
-  `lineloader.tap` and `lineborder.bin` are generated from it and `lineloader.s`.
+- `border.txt`, `band.txt` — the line-locked loader's top-border pattern and attribute band;
+  `lineloader_gen.s`, `lineloader.tap` and `lineborder.bin` are generated from them and
+  `lineloader.s`.
 - `output/` — build artifacts (`.lst` listing, `.sld` debug symbols, `.sna` snapshot for DeZog);
   regenerated by the build task except `.sna`, which is produced by saving emulator state.

@@ -330,18 +330,110 @@ D_LINE          HEAD                    ; 36
 .done           PAD 224 - 160 - 39
                 TAIL
 
-;; POST: the first paper line. Puts the border's background back and the
-;; alternate set.
+;; POST: the first paper line. Puts the border's background back and starts
+;; the attribute band. The loader's own alternate set stays saved until
+;; BAND_EXIT: nothing between here and there wants it.
 POST            HEAD_AT FIFO + 49       ; 36
                 EX AF,AF'               ; 40  the background, from PRE
                 OUT ($FE),A             ; 51
-                EXX                     ; 55
-                LD BC,(SAVE_BC)         ; 75
-                LD DE,(SAVE_DE)         ; 95
-                LD HL,(SAVE_HL)         ; 111
-                EXX                     ; 115
-                PAD 224 - 115 - 39
+                LD (BAND_SAVE_HL),HL    ; 67  the byte being decoded
+                EXX                     ; 71
+                LD A,(BAND_PHASE)       ; 84
+                ADD A,LOW BAND_VAL + 1  ; 91  line 1 (line 0 was written last frame)
+                LD C,A                  ; 95
+                LD B,HIGH BAND_VAL      ; 102 B'C' -> line 1's colour
+                LD DE,BAND_ROWLO + 1    ; 112 D'E' -> line 1's row end
+                LD H,HIGH BAND_ROW0_END ; 119
+                LD A,(DE)               ; 126
+                LD L,A                  ; 130 H'L' = line 1's row end
+                LD A,(BC)               ; 137
+                EXX                     ; 141
+                LD H,A                  ; 145
+                LD L,A                  ; 149 HL = line 1's colour, twice
+                LD (BAND_V0),HL         ; 165 which is next frame's line 0 too
+                LD B,BAND_LINES - 1     ; 172
+                PAD 189 - 172
+                JP BAND_TAIL            ; 199
+
+;; ===========================================================================
+;; The attribute band: rows 0-7 of the paper (scanlines 64-127), columns
+;; BAND_X to BAND_X + 13, rewritten every scanline with that scanline's colour
+;; from BAND_VAL - which moves up a scanline a frame (BAND_PHASE).
+;;
+;; A scanline's attributes must be written after the ULA has read them for the
+;; scanline before and before it reads them for this one, and never while the
+;; ULA is fetching, or the write would be held and the line stretched. Both are
+;; met at the turn of the line: the ULA fetches 79 to 206 T-states into a band
+;; line, and reads column x at about 82 + 4x. So one PUSH (two columns) goes at
+;; 213 of the line before, the IN at 0 as ever, then six PUSHes, the last
+;; written at 74, and the rest of the head after them. Seven PUSHes: 14 columns.
+;;
+;; While the band runs: HL is the colour (BAND_SAVE_HL keeps the decoder's),
+;; B counts the lines, H'L' is the row end SP starts each line from, D'E'
+;; walks BAND_ROWLO and B'C' walks BAND_VAL. SP is free: no D line has run yet
+;; this frame, so it is put back as FIFO.
+BAND_TAIL       EXX                     ; 203
+                LD SP,HL                ; 209 this line's row end
+                EXX                     ; 213
+                PUSH HL                 ; 224 its last two columns (written 218, 221)
+BAND_LOOP       IN A,($FE)              ; 11
+                DUP 6
+                PUSH HL                 ; 77  the other twelve, the last at 74
+                EDUP
+                XOR C                   ; 81  the rest of the head
+                LD (DE),A               ; 88
+                INC DE                  ; 94
+                XOR C                   ; 98
+                LD C,A                  ; 102
+                DEC B                   ; 106
+                JP Z,BAND_EXIT          ; 116
+                EXX                     ; 120
+                INC E                   ; 124
+                LD A,(DE)               ; 131
+                LD L,A                  ; 135 next line's row end
+                INC C                   ; 139
+                LD A,(BC)               ; 146
+                EXX                     ; 150
+                LD H,A                  ; 154
+                LD L,A                  ; 158 next line's colour
+                PAD 189 - 158
+                JP BAND_TAIL            ; 199
+
+;; The last band line: put the loader's alternate set back, and start on line
+;; 0 for next frame, which no scanline shows until then.
+BAND_EXIT       EXX                     ; 120
+                LD BC,(SAVE_BC)         ; 140
+                LD DE,(SAVE_DE)         ; 160
+                LD HL,(SAVE_HL)         ; 176
+                EXX                     ; 180
+                LD HL,(BAND_V0)         ; 196
+                PAD 203 - 196
+                LD SP,BAND_ROW0_END     ; 213
+                PUSH HL                 ; 224
+BAND_END        IN A,($FE)              ; 11
+                DUP 6
+                PUSH HL                 ; 77
+                EDUP
+                XOR C                   ; 81
+                LD (DE),A               ; 88
+                INC DE                  ; 94
+                XOR C                   ; 98
+                LD C,A                  ; 102
+                LD A,(BAND_PHASE)       ; 115 a scanline further for next frame
+                INC A                   ; 119
+                LD B,A                  ; 123
+                CP BAND_WRAP            ; 130
+                SBC A,A                 ; 134 (FF while below BAND_WRAP)
+                AND B                   ; 138
+                LD (BAND_PHASE),A       ; 151
+                LD HL,(BAND_SAVE_HL)    ; 167
+                LD SP,FIFO              ; 177
+                PAD 224 - 177 - 39
                 TAIL
+
+BAND_SAVE_HL    DW 0
+BAND_V0         DW 0
+BAND_PHASE      DB 0
 
 ;; After the handler: back to the main set and on to the next line.
 I_DONE          EXX                     ; 87 + HANDLER_T
@@ -394,6 +486,24 @@ BORDER_ROWS_AT
 ;; points at the 48K ROM's spare $FF bytes, so the vector is $FFFF, where a JR
 ;; reads its offset from $0000 ($F3, -13) and lands on SYNC_ISR at $FFF4.
 LOADER_INIT     LD (SAVED_SP),SP
+                ; Each band line's row end, and a black band until the tape
+                ; brings its colours.
+                LD HL,BAND_ROWLO
+                LD DE,$0800 + LOW BAND_ROW0_END
+.row            LD B,8
+.line           LD (HL),E
+                INC HL
+                DJNZ .line
+                LD A,E
+                ADD A,32
+                LD E,A
+                DEC D
+                JR NZ,.row
+                LD HL,BAND_VAL
+                LD B,128
+.black          LD (HL),0
+                INC HL
+                DJNZ .black
                 EXX
                 LD DE,QUEUE
                 EXX

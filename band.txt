@@ -1,0 +1,11 @@
+# The attribute band: rows 0-7 of the paper (scanlines 64-127), 14 columns,
+# rewritten every scanline while the tape loads. Compile with:
+#   python make_lineloader.py border.txt band.txt
+#
+# The band's first column, 0 to 17 (9 centres it).
+column 9
+# One attribute a scanline, top to bottom: ink + 8 * paper, + 64 for bright.
+# They repeat down the band, and move up a scanline every frame. These are
+# bright inks on black paper, two scanlines each: red, yellow, green, cyan,
+# blue, magenta, white and back.
+attributes 66 66 70 70 68 68 69 69 65 65 67 67 71 71 67 67 65 65 69 69 68 68 70 70

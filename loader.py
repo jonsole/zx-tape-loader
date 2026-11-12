@@ -671,15 +671,19 @@ def build_fast_tape(source_path, loader_tap='loader.tap', entry_address=None,
 
 
 def line_border_blocks(path='lineborder.bin'):
-    """The blocks that bring the line-locked loader's border pattern, from the
-    lineborder.bin that assembling lineloader.s writes: its colours and rows,
-    then one byte that points PRE's jump at the rows. Until that byte arrives
-    the loader draws a black border, so the rows can load in safety; the byte
-    is written between frames, so the pattern starts on a whole frame."""
+    """The blocks that bring the line-locked loader's border pattern and band
+    colours, from the lineborder.bin that assembling lineloader.s writes: the
+    pattern's colours and rows, one byte that points PRE's jump at the rows,
+    then the attribute band's 128 colours. Until the byte arrives the loader
+    draws a black border, so the rows load in safety, and the byte is written
+    between frames, so the pattern starts on a whole frame; the band is black
+    until its colours arrive."""
     with open(path, 'rb') as f:
         data = f.read()
-    at, switch_at, switch = struct.unpack('<HHB', data[:5])
-    return [(at, data[5:]), (switch_at, bytes([switch]))]
+    at, switch_at, switch, band_at, length = struct.unpack('<HHBHH', data[:9])
+    rows = data[9:9 + length]
+    band = data[9 + length:]
+    return [(at, rows), (switch_at, bytes([switch])), (band_at, band)]
 
 
 def build_line_tape(blocks, entry_address, loader_tap='lineloader.tap', border='lineborder.bin'):
